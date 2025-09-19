@@ -133,8 +133,6 @@ func getMovie(c *gin.Context) {
 		"Title":    movie.Title,
 		"Year":     movie.Year,
 		"Plot":     movie.Plot,
-		"Country":  movie.Country,
-		"Awards":   movie.Awards,
 		"Director": movie.Director,
 		"Ratings":  movie.Ratings,
 	})
