@@ -10,23 +10,28 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
 )
 
 var OMDB_API_KEY string
 
-//movie responses
+//response
 type MovieResponse struct {
 	Title      string `json:"Title"`
 	Year       string `json:"Year"`
-	Genre      string `json:"Genre"`
 	Plot       string `json:"Plot"`
+	Genre      string `json:"Genre"`
+	Season     string `json:"Season,omitempty"`
+	Episode    string `json:"Episode,omitempty"`
+	Released   string `json:"Released,omitempty"`
 	IMDBID     string `json:"imdbID"`
 	IMDBRating string `json:"imdbRating"`
-	Response   string `json:"Response"`
-	Error      string `json:"Error,omitempty"`
+	Ratings    []struct {
+		Source string `json:"Source"`
+		Value  string `json:"Value"`
+	} `json:"Ratings"`
+	Response string `json:"Response"`
+	Error    string `json:"Error,omitempty"`
 }
-
 
 type SearchResults struct {
 	Search []struct {
@@ -39,8 +44,8 @@ type SearchResults struct {
 	Error    string `json:"Error,omitempty"`
 }
 
-//get movie details
-func fetchMovie(params map[string]string) (*MovieResponse, error) {
+//fetcher
+func fetchFromOMDb(params map[string]string, out interface{}) error {
 	baseURL := "http://www.omdbapi.com/"
 	query := ""
 	for k, v := range params {
@@ -50,46 +55,55 @@ func fetchMovie(params map[string]string) (*MovieResponse, error) {
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return err
+	}
+
+	//check if found
+	switch v := out.(type) {
+	case *MovieResponse:
+		if v.Response == "False" {
+			return fmt.Errorf(v.Error)
+		}
+	case *SearchResults:
+		if v.Response == "False" {
+			return fmt.Errorf(v.Error)
+		}
+	}
+	return nil
+}
+
+//wrapper
+func fetchMovie(params map[string]string) (*MovieResponse, error) {
 	var movie MovieResponse
-	if err := json.NewDecoder(resp.Body).Decode(&movie); err != nil {
+	if err := fetchFromOMDb(params, &movie); err != nil {
 		return nil, err
 	}
-
-	if movie.Response == "False" {
-		return nil, fmt.Errorf(movie.Error)
-	}
-
 	return &movie, nil
 }
 
-//get search results
 func fetchSearchResults(query string) (*SearchResults, error) {
-	baseURL := "http://www.omdbapi.com/"
-	url := fmt.Sprintf("%s?apikey=%s&s=%s&type=movie", baseURL, OMDB_API_KEY, query)
+	return fetchSearchPage(query, 1)
+}
 
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
+func fetchSearchPage(query string, page int) (*SearchResults, error) {
+	params := map[string]string{
+		"s":    query,
+		"type": "movie",
+		"page": strconv.Itoa(page),
 	}
-	defer resp.Body.Close()
-
 	var results SearchResults
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+	if err := fetchFromOMDb(params, &results); err != nil {
 		return nil, err
 	}
-
-	if results.Response == "False" {
-		return nil, fmt.Errorf(results.Error)
-	}
-
 	return &results, nil
 }
 
-// get info
+//handelers
 func getMovie(c *gin.Context) {
 	title := c.Query("title")
 	id := c.Query("id")
@@ -113,10 +127,16 @@ func getMovie(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, movie)
+	c.JSON(http.StatusOK, gin.H{
+		"Title":    movie.Title,
+		"Year":     movie.Year,
+		"Plot":     movie.Plot,
+		"Director": movie.Director,
+		"Ratings":  movie.Ratings,
+	})
 }
 
-//get episodes
+
 func getEpisode(c *gin.Context) {
 	seriesTitle := c.Query("series_title")
 	season := c.Query("season")
@@ -135,19 +155,18 @@ func getEpisode(c *gin.Context) {
 		"Episode": episode,
 	}
 
-	ep, err := fetchFromOMDb(params)
+	ep, err := fetchMovie(params)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Clean response
 	c.JSON(http.StatusOK, gin.H{
-		"Series":     ep.Title,    // OMDb puts series title here
-		"Episode":    ep.Episode,  // episode number
-		"Season":     ep.Season,   // season number
-		"Title":      ep.Title,    // episode title
-		"Released":   ep.Released, // release date
+		"Series":     seriesTitle,
+		"Episode":    ep.Episode,
+		"Season":     ep.Season,
+		"Title":      ep.Title,
+		"Released":   ep.Released,
 		"Plot":       ep.Plot,
 		"imdbID":     ep.IMDBID,
 		"imdbRating": ep.IMDBRating,
@@ -155,7 +174,6 @@ func getEpisode(c *gin.Context) {
 }
 
 
-//get genre movies
 func getMoviesByGenre(c *gin.Context) {
 	genre := c.Query("genre")
 	if genre == "" {
@@ -174,7 +192,7 @@ func getMoviesByGenre(c *gin.Context) {
 
 		for _, item := range results.Search {
 			movie, err := fetchMovie(map[string]string{"i": item.IMDBID})
-			if err != nil || movie.Response == "False" || movie.IMDBRating == "N/A" {
+			if err != nil || movie.IMDBRating == "N/A" || movie.Response == "False" {
 				continue
 			}
 
@@ -207,7 +225,7 @@ func getMoviesByGenre(c *gin.Context) {
 	c.JSON(http.StatusOK, matchingMovies)
 }
 
-// get recommendations
+
 func getRecommendations(c *gin.Context) {
 	fav := c.Query("favorite_movie")
 	if fav == "" {
@@ -215,19 +233,19 @@ func getRecommendations(c *gin.Context) {
 		return
 	}
 
-	// Step 1: Fetch favorite movie details
-	favMovie, err := fetchFromOMDb(map[string]string{"t": fav})
+	//find fav movie deets
+	favMovie, err := fetchMovie(map[string]string{"t": fav})
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Favorite movie not found"})
 		return
 	}
 
-	// Step 2: Extract metadata
+	//extract data
 	genres := strings.Split(favMovie.Genre, ",")
 	directors := strings.Split(favMovie.Director, ",")
 	actors := strings.Split(favMovie.Actors, ",")
 
-	// Helper to collect recommendations
+	//collect recommendations
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
 		seen := map[string]bool{}
@@ -243,7 +261,7 @@ func getRecommendations(c *gin.Context) {
 				if seen[s.IMDBID] || s.IMDBID == favMovie.IMDBID {
 					continue
 				}
-				movie, err := fetchFromOMDb(map[string]string{"i": s.IMDBID})
+				movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
 				if err != nil || movie.IMDBRating == "N/A" {
 					continue
 				}
@@ -260,7 +278,6 @@ func getRecommendations(c *gin.Context) {
 			}
 		}
 
-		// Sort by IMDb rating
 		sort.Slice(results, func(i, j int) bool {
 			ri, _ := strconv.ParseFloat(results[i]["imdbRating"].(string), 64)
 			rj, _ := strconv.ParseFloat(results[j]["imdbRating"].(string), 64)
@@ -273,13 +290,13 @@ func getRecommendations(c *gin.Context) {
 		return results
 	}
 
-	// Step 3: Build hierarchical list
+	//build list by heirarchy
 	final := []gin.H{}
 	final = append(final, collect("Genre", genres, 20)...)
 	final = append(final, collect("Director", directors, 20)...)
 	final = append(final, collect("Actor", actors, 20)...)
 
-	// Dedup
+	
 	unique := []gin.H{}
 	seen := map[string]bool{}
 	for _, m := range final {
@@ -291,17 +308,15 @@ func getRecommendations(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"favorite_movie": favMovie.Title,
+		"favorite_movie":  favMovie.Title,
 		"recommendations": unique,
 	})
 }
 
-
 func main() {
-	
 	OMDB_API_KEY = os.Getenv("OMDB_API_KEY")
 	if OMDB_API_KEY == "" {
-		panic("set api key")
+		panic("set OMDB_API_KEY in your environment")
 	}
 
 	router := gin.Default()
@@ -313,4 +328,3 @@ func main() {
 
 	router.Run(":8080")
 }
-
