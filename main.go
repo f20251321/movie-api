@@ -235,29 +235,24 @@ func getRecommendations(c *gin.Context) {
 		return
 	}
 
-	
 	favMovie, err := fetchMovie(map[string]string{"t": fav})
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Favorite movie not found"})
 		return
 	}
 
-	
 	genres := strings.Split(favMovie.Genre, ",")
 	directors := strings.Split(favMovie.Director, ",")
 	actors := strings.Split(favMovie.Actors, ",")
 
-	
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
 		seen := map[string]bool{}
-
 		for _, kw := range keywords {
 			kw = strings.TrimSpace(kw)
 			if kw == "" || kw == "N/A" {
 				continue
 			}
-
 			search, _ := fetchSearchPage(kw, 1)
 			for _, s := range search.Search {
 				if seen[s.IMDBID] || s.IMDBID == favMovie.IMDBID {
@@ -267,7 +262,6 @@ func getRecommendations(c *gin.Context) {
 				if err != nil || movie.IMDBRating == "N/A" {
 					continue
 				}
-
 				seen[s.IMDBID] = true
 				results = append(results, gin.H{
 					"Title":      movie.Title,
@@ -279,26 +273,22 @@ func getRecommendations(c *gin.Context) {
 				})
 			}
 		}
-
 		sort.Slice(results, func(i, j int) bool {
 			ri, _ := strconv.ParseFloat(results[i]["imdbRating"].(string), 64)
 			rj, _ := strconv.ParseFloat(results[j]["imdbRating"].(string), 64)
 			return ri > rj
 		})
-
 		if len(results) > limit {
 			results = results[:limit]
 		}
 		return results
 	}
 
-	
 	final := []gin.H{}
 	final = append(final, collect("Genre", genres, 20)...)
 	final = append(final, collect("Director", directors, 20)...)
 	final = append(final, collect("Actor", actors, 20)...)
 
-	
 	unique := []gin.H{}
 	seen := map[string]bool{}
 	for _, m := range final {
