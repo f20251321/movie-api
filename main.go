@@ -245,17 +245,23 @@ func getRecommendations(c *gin.Context) {
 	directors := strings.Split(favMovie.Director, ",")
 	actors := strings.Split(favMovie.Actors, ",")
 
+	seen := map[string]bool{favMovie.IMDBID: true}
+
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
-		seen := map[string]bool{}
 		for _, kw := range keywords {
 			kw = strings.TrimSpace(kw)
 			if kw == "" || kw == "N/A" {
 				continue
 			}
-			search, _ := fetchSearchPage(kw, 1)
+
+			search, err := fetchSearchPage(kw, 1)
+			if err != nil || search == nil {
+				continue
+			}
+
 			for _, s := range search.Search {
-				if seen[s.IMDBID] || s.IMDBID == favMovie.IMDBID {
+				if seen[s.IMDBID] {
 					continue
 				}
 				movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
@@ -271,6 +277,12 @@ func getRecommendations(c *gin.Context) {
 					"imdbID":     movie.IMDBID,
 					"Why":        level,
 				})
+				if len(results) >= limit {
+					break
+				}
+			}
+			if len(results) >= limit {
+				break
 			}
 		}
 		sort.Slice(results, func(i, j int) bool {
@@ -278,32 +290,20 @@ func getRecommendations(c *gin.Context) {
 			rj, _ := strconv.ParseFloat(results[j]["imdbRating"].(string), 64)
 			return ri > rj
 		})
-		if len(results) > limit {
-			results = results[:limit]
-		}
 		return results
 	}
 
-	final := []gin.H{}
-	final = append(final, collect("Genre", genres, 20)...)
-	final = append(final, collect("Director", directors, 20)...)
-	final = append(final, collect("Actor", actors, 20)...)
-
-	unique := []gin.H{}
-	seen := map[string]bool{}
-	for _, m := range final {
-		id := m["imdbID"].(string)
-		if !seen[id] {
-			unique = append(unique, m)
-			seen[id] = true
-		}
-	}
+	recs := []gin.H{}
+	recs = append(recs, collect("Genre", genres, 20)...)
+	recs = append(recs, collect("Director", directors, 20)...)
+	recs = append(recs, collect("Actor", actors, 20)...)
 
 	c.JSON(http.StatusOK, gin.H{
 		"favorite_movie":  favMovie.Title,
-		"recommendations": unique,
+		"recommendations": recs,
 	})
 }
+
 
 
 func main() {
