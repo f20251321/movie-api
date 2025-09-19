@@ -244,8 +244,7 @@ func getRecommendations(c *gin.Context) {
 	//extract data
 	genres := strings.Split(favMovie.Genre, ",")
 	directors := strings.Split(favMovie.Director, ",")
-	actors := strings.Split(favMovie.Actors, ",")
-
+	
 	//collect recommendations
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
