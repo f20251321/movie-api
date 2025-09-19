@@ -32,6 +32,7 @@ type MovieResponse struct {
 	Response string `json:"Response"`
 	Error    string `json:"Error,omitempty"`
 	Director   string `json:"Director"`
+	Actors     string `json:"Actors"`
 }
 
 type SearchResults struct {
