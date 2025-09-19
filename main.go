@@ -118,21 +118,42 @@ func getMovie(c *gin.Context) {
 
 //get episodes
 func getEpisode(c *gin.Context) {
+	seriesTitle := c.Query("series_title")
 	season := c.Query("season")
-	episode := c.Query("episode")
+	episode := c.Query("episode_number")
 
-	if season == "" || episode == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide ?season=1&episode=1"})
+	if seriesTitle == "" || season == "" || episode == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Please provide ?series_title=...&season=1&episode_number=1",
+		})
 		return
 	}
 
+	params := map[string]string{
+		"t":       seriesTitle,
+		"Season":  season,
+		"Episode": episode,
+	}
+
+	ep, err := fetchFromOMDb(params)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Clean response
 	c.JSON(http.StatusOK, gin.H{
-		"season":  season,
-		"episode": episode,
-		"title":   "Sample Episode",
-		"plot":    "This is just a placeholder episode.",
+		"Series":     ep.Title,    // OMDb puts series title here
+		"Episode":    ep.Episode,  // episode number
+		"Season":     ep.Season,   // season number
+		"Title":      ep.Title,    // episode title
+		"Released":   ep.Released, // release date
+		"Plot":       ep.Plot,
+		"imdbID":     ep.IMDBID,
+		"imdbRating": ep.IMDBRating,
 	})
 }
+
 
 //get genre movies
 func getMoviesByGenre(c *gin.Context) {
@@ -186,12 +207,95 @@ func getMoviesByGenre(c *gin.Context) {
 	c.JSON(http.StatusOK, matchingMovies)
 }
 
-//find recommendations
+// get recommendations
 func getRecommendations(c *gin.Context) {
+	fav := c.Query("favorite_movie")
+	if fav == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide ?favorite_movie=MovieTitle"})
+		return
+	}
+
+	// Step 1: Fetch favorite movie details
+	favMovie, err := fetchFromOMDb(map[string]string{"t": fav})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Favorite movie not found"})
+		return
+	}
+
+	// Step 2: Extract metadata
+	genres := strings.Split(favMovie.Genre, ",")
+	directors := strings.Split(favMovie.Director, ",")
+	actors := strings.Split(favMovie.Actors, ",")
+
+	// Helper to collect recommendations
+	collect := func(level string, keywords []string, limit int) []gin.H {
+		results := []gin.H{}
+		seen := map[string]bool{}
+
+		for _, kw := range keywords {
+			kw = strings.TrimSpace(kw)
+			if kw == "" || kw == "N/A" {
+				continue
+			}
+
+			search, _ := fetchSearchPage(kw, 1)
+			for _, s := range search.Search {
+				if seen[s.IMDBID] || s.IMDBID == favMovie.IMDBID {
+					continue
+				}
+				movie, err := fetchFromOMDb(map[string]string{"i": s.IMDBID})
+				if err != nil || movie.IMDBRating == "N/A" {
+					continue
+				}
+
+				seen[s.IMDBID] = true
+				results = append(results, gin.H{
+					"Title":      movie.Title,
+					"Year":       movie.Year,
+					"Genre":      movie.Genre,
+					"imdbRating": movie.IMDBRating,
+					"imdbID":     movie.IMDBID,
+					"Why":        level,
+				})
+			}
+		}
+
+		// Sort by IMDb rating
+		sort.Slice(results, func(i, j int) bool {
+			ri, _ := strconv.ParseFloat(results[i]["imdbRating"].(string), 64)
+			rj, _ := strconv.ParseFloat(results[j]["imdbRating"].(string), 64)
+			return ri > rj
+		})
+
+		if len(results) > limit {
+			results = results[:limit]
+		}
+		return results
+	}
+
+	// Step 3: Build hierarchical list
+	final := []gin.H{}
+	final = append(final, collect("Genre", genres, 20)...)
+	final = append(final, collect("Director", directors, 20)...)
+	final = append(final, collect("Actor", actors, 20)...)
+
+	// Dedup
+	unique := []gin.H{}
+	seen := map[string]bool{}
+	for _, m := range final {
+		id := m["imdbID"].(string)
+		if !seen[id] {
+			unique = append(unique, m)
+			seen[id] = true
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"recommendations": []string{"Inception", "Interstellar", "The Dark Knight"},
+		"favorite_movie": favMovie.Title,
+		"recommendations": unique,
 	})
 }
+
 
 func main() {
 	
