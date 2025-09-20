@@ -255,30 +255,33 @@ func getRecommendations(c *gin.Context) {
 				continue
 			}
 
-			search, err := fetchSearchPage(kw, 1)
-			if err != nil || search == nil {
-				continue
-			}
+			
+			for page := 1; page <= 3 && len(results) < limit; page++ {
+				search, err := fetchSearchPage(kw, page)
+				if err != nil || search == nil {
+					continue
+				}
 
-			for _, s := range search.Search {
-				if seen[s.IMDBID] {
-					continue
-				}
-				movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
-				if err != nil || movie.IMDBRating == "N/A" {
-					continue
-				}
-				seen[s.IMDBID] = true
-				results = append(results, gin.H{
-					"Title":      movie.Title,
-					"Year":       movie.Year,
-					"Genre":      movie.Genre,
-					"imdbRating": movie.IMDBRating,
-					"imdbID":     movie.IMDBID,
-					"Why":        level,
-				})
-				if len(results) >= limit {
-					break
+				for _, s := range search.Search {
+					if seen[s.IMDBID] {
+						continue
+					}
+					movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
+					if err != nil || movie.IMDBRating == "N/A" {
+						continue
+					}
+					seen[s.IMDBID] = true
+					results = append(results, gin.H{
+						"Title":      movie.Title,
+						"Year":       movie.Year,
+						"Genre":      movie.Genre,
+						"imdbRating": movie.IMDBRating,
+						"imdbID":     movie.IMDBID,
+						"Why":        level,
+					})
+					if len(results) >= limit {
+						break
+					}
 				}
 			}
 			if len(results) >= limit {
@@ -293,16 +296,21 @@ func getRecommendations(c *gin.Context) {
 		return results
 	}
 
-	recs := []gin.H{}
-	recs = append(recs, collect("Genre", genres, 20)...)
-	recs = append(recs, collect("Director", directors, 20)...)
-	recs = append(recs, collect("Actor", actors, 20)...)
+	
+	genreRecs := collect("Genre", genres, 20)
+	directorRecs := collect("Director", directors, 20)
+	actorRecs := collect("Actor", actors, 20)
 
 	c.JSON(http.StatusOK, gin.H{
-		"favorite_movie":  favMovie.Title,
-		"recommendations": recs,
+		"favorite_movie": favMovie.Title,
+		"recommendations": gin.H{
+			"by_genre":    genreRecs,
+			"by_director": directorRecs,
+			"by_actor":    actorRecs,
+		},
 	})
 }
+
 
 
 
