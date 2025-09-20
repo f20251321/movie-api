@@ -14,7 +14,6 @@ import (
 
 var OMDB_API_KEY string
 
-
 type MovieResponse struct {
 	Title      string `json:"Title"`
 	Year       string `json:"Year"`
@@ -48,7 +47,6 @@ type SearchResults struct {
 	Error    string `json:"Error,omitempty"`
 }
 
-
 func fetchFromOMDb(params map[string]string, out interface{}) error {
 	baseURL := "http://www.omdbapi.com/"
 	query := ""
@@ -67,7 +65,6 @@ func fetchFromOMDb(params map[string]string, out interface{}) error {
 		return err
 	}
 
-	
 	switch v := out.(type) {
 	case *MovieResponse:
 		if v.Response == "False" {
@@ -80,7 +77,6 @@ func fetchFromOMDb(params map[string]string, out interface{}) error {
 	}
 	return nil
 }
-
 
 func fetchMovie(params map[string]string) (*MovieResponse, error) {
 	var movie MovieResponse
@@ -135,13 +131,12 @@ func getMovie(c *gin.Context) {
 		"Title":    movie.Title,
 		"Year":     movie.Year,
 		"Plot":     movie.Plot,
+		"Country":  movie.Country,  
+		"Awards":   movie.Awards,  
 		"Director": movie.Director,
-		"Country":  movie.Country,
-		"Awards":   movie.Awards,
 		"Ratings":  movie.Ratings,
 	})
 }
-
 
 func getEpisode(c *gin.Context) {
 	seriesTitle := c.Query("series_title")
@@ -174,8 +169,6 @@ func getEpisode(c *gin.Context) {
 		"Title":      ep.Title,
 		"Released":   ep.Released,
 		"Plot":       ep.Plot,
-		"Country":    ep.Country,
-		"Awards":     ep.Awards,
 		"imdbID":     ep.IMDBID,
 		"imdbRating": ep.IMDBRating,
 	})
@@ -190,19 +183,18 @@ func getMoviesByGenre(c *gin.Context) {
 	}
 
 	matchingMovies := []map[string]interface{}{}
-	seen := map[string]bool{} // Duplicate prevention
+	seen := make(map[string]bool)
+
 	
-	// Expanded search seeds for better coverage (30+ terms)
 	searchSeeds := []string{
-		"the", "a", "love", "man", "girl", "night", "day", "life", "time", "world",
-		"last", "first", "new", "old", "big", "small", "good", "bad", "best", "war",
-		"king", "queen", "hero", "dark", "light", "red", "blue", "black", "white", "green",
-		"house", "home", "city", "american", "story", "lost", "dead", "ghost", "secret", "mystery",
-		"power", "fight", "blood", "heart", "soul", "mad", "wild", "fire", "water", "land"
+		"the", "a", "love", "man", "girl", "night", "day", "war", "life", "death",
+		"hero", "king", "queen", "dark", "light", "red", "black", "white", "green",
+		"star", "moon", "sun", "fire", "water", "blood", "heart", "soul", "time",
+		"world", "house", "home", "city", "road", "story", "game", "fight", "power",
 	}
 
+	
 	for _, seed := range searchSeeds {
-		// Search through 5 pages per seed instead of just 1
 		for page := 1; page <= 5; page++ {
 			results, err := fetchSearchPage(seed, page)
 			if err != nil {
@@ -210,7 +202,6 @@ func getMoviesByGenre(c *gin.Context) {
 			}
 
 			for _, item := range results.Search {
-				// Skip if we've already processed this movie
 				if seen[item.IMDBID] {
 					continue
 				}
@@ -224,15 +215,7 @@ func getMoviesByGenre(c *gin.Context) {
 				genres := strings.Split(movie.Genre, ",")
 				for _, g := range genres {
 					if strings.EqualFold(strings.TrimSpace(g), genre) {
-						matchingMovies = append(matchingMovies, map[string]interface{}{
-							"Title":      movie.Title,
-							"Year":       movie.Year,
-							"Genre":      movie.Genre,
-							"Country":    movie.Country,
-							"Awards":     movie.Awards,
-							"imdbRating": movie.IMDBRating,
-							"imdbID":     movie.IMDBID,
-						})
+						matchingMovies = append(matchingMovies, map[string]interface{}{"Title": movie.Title, "Year": movie.Year, "Genre": movie.Genre, "imdbRating": movie.IMDBRating, "imdbID": movie.IMDBID,})
 						break
 					}
 				}
@@ -240,12 +223,14 @@ func getMoviesByGenre(c *gin.Context) {
 		}
 	}
 
+	
 	sort.Slice(matchingMovies, func(i, j int) bool {
 		r1, _ := strconv.ParseFloat(matchingMovies[i]["imdbRating"].(string), 64)
 		r2, _ := strconv.ParseFloat(matchingMovies[j]["imdbRating"].(string), 64)
 		return r1 > r2
 	})
 
+	
 	if len(matchingMovies) > 15 {
 		matchingMovies = matchingMovies[:15]
 	}
@@ -275,42 +260,31 @@ func getRecommendations(c *gin.Context) {
 
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
-		localSeen := map[string]bool{} // Local duplicate prevention for this collection
-		
 		for _, kw := range keywords {
 			kw = strings.TrimSpace(kw)
 			if kw == "" || kw == "N/A" {
 				continue
 			}
 
-			// Increased page searches from 3 to 5 per seed
-			for page := 1; page <= 5 && len(results) < limit; page++ {
+			for page := 1; page <= 3 && len(results) < limit; page++ {
 				search, err := fetchSearchPage(kw, page)
 				if err != nil || search == nil {
 					continue
 				}
 
 				for _, s := range search.Search {
-					// Check both global and local seen maps
-					if seen[s.IMDBID] || localSeen[s.IMDBID] {
+					if seen[s.IMDBID] {
 						continue
 					}
-					
 					movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
 					if err != nil || movie.IMDBRating == "N/A" {
 						continue
 					}
-					
-					// Mark as seen in both maps
 					seen[s.IMDBID] = true
-					localSeen[s.IMDBID] = true
-					
 					results = append(results, gin.H{
 						"Title":      movie.Title,
 						"Year":       movie.Year,
 						"Genre":      movie.Genre,
-						"Country":    movie.Country,
-						"Awards":     movie.Awards,
 						"imdbRating": movie.IMDBRating,
 						"imdbID":     movie.IMDBID,
 						"Why":        level,
@@ -333,9 +307,9 @@ func getRecommendations(c *gin.Context) {
 	}
 
 	
-	genreRecs := collect("Genre", genres, 5)
-	directorRecs := collect("Director", directors, 5)
-	actorRecs := collect("Actor", actors, 5)
+	genreRecs := collect("Genre", genres, 20)
+	directorRecs := collect("Director", directors, 20)
+	actorRecs := collect("Actor", actors, 20)
 
 	c.JSON(http.StatusOK, gin.H{
 		"favorite_movie": favMovie.Title,
@@ -346,10 +320,6 @@ func getRecommendations(c *gin.Context) {
 		},
 	})
 }
-
-
-
-
 
 func main() {
 	OMDB_API_KEY = os.Getenv("OMDB_API_KEY")
