@@ -255,7 +255,6 @@ func getRecommendations(c *gin.Context) {
 				continue
 			}
 
-			
 			for page := 1; page <= 3 && len(results) < limit; page++ {
 				search, err := fetchSearchPage(kw, page)
 				if err != nil || search == nil {
@@ -297,9 +296,9 @@ func getRecommendations(c *gin.Context) {
 	}
 
 	
-	genreRecs := collect("Genre", genres, 20)
-	directorRecs := collect("Director", directors, 20)
-	actorRecs := collect("Actor", actors, 20)
+	genreRecs := collect("Genre", genres, 5)
+	directorRecs := collect("Director", directors, 5)
+	actorRecs := collect("Actor", actors, 5)
 
 	c.JSON(http.StatusOK, gin.H{
 		"favorite_movie": favMovie.Title,
@@ -310,6 +309,7 @@ func getRecommendations(c *gin.Context) {
 		},
 	})
 }
+
 
 
 
