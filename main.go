@@ -215,13 +215,7 @@ func getMoviesByGenre(c *gin.Context) {
 				genres := strings.Split(movie.Genre, ",")
 				for _, g := range genres {
 					if strings.EqualFold(strings.TrimSpace(g), genre) {
-						matchingMovies = append(matchingMovies, map[string]interface{}{
-							"Title":      movie.Title,
-							"Year":       movie.Year,
-							"Genre":      movie.Genre,
-							"imdbRating": movie.IMDBRating,
-							"imdbID":     movie.IMDBID,
-						})
+						matchingMovies = append(matchingMovies, map[string]interface{}{"Title": movie.Title, "Year": movie.Year, "Genre": movie.Genre, "imdbRating": movie.IMDBRating, "imdbID": movie.IMDBID})
 						break
 					}
 				}
