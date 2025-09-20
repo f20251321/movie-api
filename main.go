@@ -190,33 +190,51 @@ func getMoviesByGenre(c *gin.Context) {
 	}
 
 	matchingMovies := []map[string]interface{}{}
-	searchSeeds := []string{"the", "a", "love", "man", "girl", "night", "day"}
+	seen := map[string]bool{} // Duplicate prevention
+	
+	// Expanded search seeds for better coverage (30+ terms)
+	searchSeeds := []string{
+		"the", "a", "love", "man", "girl", "night", "day", "life", "time", "world",
+		"last", "first", "new", "old", "big", "small", "good", "bad", "best", "war",
+		"king", "queen", "hero", "dark", "light", "red", "blue", "black", "white", "green",
+		"house", "home", "city", "american", "story", "lost", "dead", "ghost", "secret", "mystery",
+		"power", "fight", "blood", "heart", "soul", "mad", "wild", "fire", "water", "land"
+	}
 
 	for _, seed := range searchSeeds {
-		results, err := fetchSearchResults(seed)
-		if err != nil {
-			continue
-		}
-
-		for _, item := range results.Search {
-			movie, err := fetchMovie(map[string]string{"i": item.IMDBID})
-			if err != nil || movie.IMDBRating == "N/A" {
+		// Search through 5 pages per seed instead of just 1
+		for page := 1; page <= 5; page++ {
+			results, err := fetchSearchPage(seed, page)
+			if err != nil {
 				continue
 			}
 
-			genres := strings.Split(movie.Genre, ",")
-			for _, g := range genres {
-				if strings.EqualFold(strings.TrimSpace(g), genre) {
-					matchingMovies = append(matchingMovies, map[string]interface{}{
-						"Title":      movie.Title,
-						"Year":       movie.Year,
-						"Genre":      movie.Genre,
-						"Country":    movie.Country,
-						"Awards":     movie.Awards,
-						"imdbRating": movie.IMDBRating,
-						"imdbID":     movie.IMDBID,
-					})
-					break
+			for _, item := range results.Search {
+				// Skip if we've already processed this movie
+				if seen[item.IMDBID] {
+					continue
+				}
+				seen[item.IMDBID] = true
+
+				movie, err := fetchMovie(map[string]string{"i": item.IMDBID})
+				if err != nil || movie.IMDBRating == "N/A" {
+					continue
+				}
+
+				genres := strings.Split(movie.Genre, ",")
+				for _, g := range genres {
+					if strings.EqualFold(strings.TrimSpace(g), genre) {
+						matchingMovies = append(matchingMovies, map[string]interface{}{
+							"Title":      movie.Title,
+							"Year":       movie.Year,
+							"Genre":      movie.Genre,
+							"Country":    movie.Country,
+							"Awards":     movie.Awards,
+							"imdbRating": movie.IMDBRating,
+							"imdbID":     movie.IMDBID,
+						})
+						break
+					}
 				}
 			}
 		}
@@ -257,27 +275,36 @@ func getRecommendations(c *gin.Context) {
 
 	collect := func(level string, keywords []string, limit int) []gin.H {
 		results := []gin.H{}
+		localSeen := map[string]bool{} // Local duplicate prevention for this collection
+		
 		for _, kw := range keywords {
 			kw = strings.TrimSpace(kw)
 			if kw == "" || kw == "N/A" {
 				continue
 			}
 
-			for page := 1; page <= 3 && len(results) < limit; page++ {
+			// Increased page searches from 3 to 5 per seed
+			for page := 1; page <= 5 && len(results) < limit; page++ {
 				search, err := fetchSearchPage(kw, page)
 				if err != nil || search == nil {
 					continue
 				}
 
 				for _, s := range search.Search {
-					if seen[s.IMDBID] {
+					// Check both global and local seen maps
+					if seen[s.IMDBID] || localSeen[s.IMDBID] {
 						continue
 					}
+					
 					movie, err := fetchMovie(map[string]string{"i": s.IMDBID})
 					if err != nil || movie.IMDBRating == "N/A" {
 						continue
 					}
+					
+					// Mark as seen in both maps
 					seen[s.IMDBID] = true
+					localSeen[s.IMDBID] = true
+					
 					results = append(results, gin.H{
 						"Title":      movie.Title,
 						"Year":       movie.Year,
