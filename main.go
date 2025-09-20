@@ -14,7 +14,6 @@ import (
 
 var OMDB_API_KEY string
 
-
 type MovieResponse struct {
 	Title      string `json:"Title"`
 	Year       string `json:"Year"`
@@ -22,6 +21,8 @@ type MovieResponse struct {
 	Director   string `json:"Director"`
 	Genre      string `json:"Genre"`
 	Actors     string `json:"Actors"`
+	Country    string `json:"Country"`
+	Awards     string `json:"Awards"`
 	Season     string `json:"Season,omitempty"`
 	Episode    string `json:"Episode,omitempty"`
 	Released   string `json:"Released,omitempty"`
@@ -46,7 +47,6 @@ type SearchResults struct {
 	Error    string `json:"Error,omitempty"`
 }
 
-
 func fetchFromOMDb(params map[string]string, out interface{}) error {
 	baseURL := "http://www.omdbapi.com/"
 	query := ""
@@ -65,7 +65,6 @@ func fetchFromOMDb(params map[string]string, out interface{}) error {
 		return err
 	}
 
-	
 	switch v := out.(type) {
 	case *MovieResponse:
 		if v.Response == "False" {
@@ -78,7 +77,6 @@ func fetchFromOMDb(params map[string]string, out interface{}) error {
 	}
 	return nil
 }
-
 
 func fetchMovie(params map[string]string) (*MovieResponse, error) {
 	var movie MovieResponse
@@ -133,11 +131,12 @@ func getMovie(c *gin.Context) {
 		"Title":    movie.Title,
 		"Year":     movie.Year,
 		"Plot":     movie.Plot,
+		"Country":  movie.Country,  
+		"Awards":   movie.Awards,  
 		"Director": movie.Director,
 		"Ratings":  movie.Ratings,
 	})
 }
-
 
 func getEpisode(c *gin.Context) {
 	seriesTitle := c.Query("series_title")
@@ -184,42 +183,60 @@ func getMoviesByGenre(c *gin.Context) {
 	}
 
 	matchingMovies := []map[string]interface{}{}
-	searchSeeds := []string{"the", "a", "love", "man", "girl", "night", "day"}
+	seen := make(map[string]bool)
 
+	
+	searchSeeds := []string{
+		"the", "a", "love", "man", "girl", "night", "day", "war", "life", "death",
+		"hero", "king", "queen", "dark", "light", "red", "black", "white", "green",
+		"star", "moon", "sun", "fire", "water", "blood", "heart", "soul", "time",
+		"world", "house", "home", "city", "road", "story", "game", "fight", "power"
+	}
+
+	
 	for _, seed := range searchSeeds {
-		results, err := fetchSearchResults(seed)
-		if err != nil {
-			continue
-		}
-
-		for _, item := range results.Search {
-			movie, err := fetchMovie(map[string]string{"i": item.IMDBID})
-			if err != nil || movie.IMDBRating == "N/A" {
+		for page := 1; page <= 5; page++ {
+			results, err := fetchSearchPage(seed, page)
+			if err != nil {
 				continue
 			}
 
-			genres := strings.Split(movie.Genre, ",")
-			for _, g := range genres {
-				if strings.EqualFold(strings.TrimSpace(g), genre) {
-					matchingMovies = append(matchingMovies, map[string]interface{}{
-						"Title":      movie.Title,
-						"Year":       movie.Year,
-						"Genre":      movie.Genre,
-						"imdbRating": movie.IMDBRating,
-						"imdbID":     movie.IMDBID,
-					})
-					break
+			for _, item := range results.Search {
+				if seen[item.IMDBID] {
+					continue
+				}
+				seen[item.IMDBID] = true
+
+				movie, err := fetchMovie(map[string]string{"i": item.IMDBID})
+				if err != nil || movie.IMDBRating == "N/A" {
+					continue
+				}
+
+				genres := strings.Split(movie.Genre, ",")
+				for _, g := range genres {
+					if strings.EqualFold(strings.TrimSpace(g), genre) {
+						matchingMovies = append(matchingMovies, map[string]interface{}{
+							"Title":      movie.Title,
+							"Year":       movie.Year,
+							"Genre":      movie.Genre,
+							"imdbRating": movie.IMDBRating,
+							"imdbID":     movie.IMDBID,
+						})
+						break
+					}
 				}
 			}
 		}
 	}
 
+	
 	sort.Slice(matchingMovies, func(i, j int) bool {
 		r1, _ := strconv.ParseFloat(matchingMovies[i]["imdbRating"].(string), 64)
 		r2, _ := strconv.ParseFloat(matchingMovies[j]["imdbRating"].(string), 64)
 		return r1 > r2
 	})
 
+	
 	if len(matchingMovies) > 15 {
 		matchingMovies = matchingMovies[:15]
 	}
@@ -296,9 +313,9 @@ func getRecommendations(c *gin.Context) {
 	}
 
 	
-	genreRecs := collect("Genre", genres, 5)
-	directorRecs := collect("Director", directors, 5)
-	actorRecs := collect("Actor", actors, 5)
+	genreRecs := collect("Genre", genres, 20)
+	directorRecs := collect("Director", directors, 20)
+	actorRecs := collect("Actor", actors, 20)
 
 	c.JSON(http.StatusOK, gin.H{
 		"favorite_movie": favMovie.Title,
@@ -309,10 +326,6 @@ func getRecommendations(c *gin.Context) {
 		},
 	})
 }
-
-
-
-
 
 func main() {
 	OMDB_API_KEY = os.Getenv("OMDB_API_KEY")
